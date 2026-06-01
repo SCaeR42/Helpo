@@ -1,0 +1,607 @@
+openapi: 3.0.3
+info:
+  title: Helpo API
+  description: |
+    REST Full API для системы управления обращениями в техническую поддержку Helpo.
+    
+    API реализует асинхронную обработку запросов через очередь RabbitMQ с возможностью
+    отслеживания статуса обработки в реальном времени.
+    
+    ## Авторизация
+    Все запросы, кроме `login`, требуют JWT-токен в заголовке `Authorization`.
+    
+    ```
+    Authorization: Bearer <your-jwt-token>
+    ```
+    
+    ## GraphQL Endpoint
+    Основной endpoint для всех операций — `POST /api/graphql`.
+  version: 1.0.0
+  contact:
+    name: Helpo Team
+    email: support@helpo.example.com
+    url: https://github.com/your-org/helpo
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+  - url: https://api.helpo.example.com
+    description: Production server
+
+tags:
+  - name: Health
+    description: Проверка работоспособности API
+  - name: Auth
+    description: Операции авторизации
+  - name: Tickets
+    description: Управление обращениями
+  - name: Messages
+    description: Работа с сообщениями в чате
+  - name: Status
+    description: Проверка статусов обращений
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health Check
+      description: Проверка работоспособности API сервера
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Сервер работает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '500':
+          description: Ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /graphql:
+    post:
+      tags:
+        - GraphQL
+      summary: GraphQL Endpoint
+      description: |
+        Основной endpoint для выполнения GraphQL запросов и мутаций.
+        
+        Поддерживаемые операции:
+        - `login` — авторизация пользователя
+        - `myTickets` — получение списка обращений
+        - `ticket` — получение одного обращения
+        - `ticketStatus` — получение статуса обращения
+        - `ticketMessages` — получение истории сообщений
+        - `createTicket` — создание нового обращения
+        - `sendMessage` — отправка сообщения в чат
+      operationId: graphqlEndpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphQLRequest'
+            examples:
+              login:
+                summary: Авторизация
+                value:
+                  query: |
+                    mutation Login($input: LoginInput!) {
+                      login(input: $input) {
+                        token
+                        user {
+                          id
+                          login
+                          createdAt
+                        }
+                      }
+                    }
+                  variables:
+                    input:
+                      login: "user@example.com"
+                      password: "password123"
+              myTickets:
+                summary: Список обращений
+                value:
+                  query: |
+                    query MyTickets {
+                      myTickets {
+                        id
+                        subject
+                        section
+                        statusCode
+                        statusName
+                        createdAt
+                        updatedAt
+                      }
+                    }
+                  variables: {}
+              createTicket:
+                summary: Создание обращения
+                value:
+                  query: |
+                    mutation CreateTicket($input: CreateTicketInput!) {
+                      createTicket(input: $input) {
+                        id
+                        subject
+                        section
+                        statusCode
+                        statusName
+                        createdAt
+                      }
+                    }
+                  variables:
+                    input:
+                      subject: "Не работает оплата"
+                      section: ERROR
+                      comment: "При оплате картой выдаётся ошибка 500"
+              ticketStatus:
+                summary: Статус обращения
+                value:
+                  query: |
+                    query TicketStatus($ticketId: ID!) {
+                      ticketStatus(ticketId: $ticketId) {
+                        code
+                        name
+                        message
+                      }
+                    }
+                  variables:
+                    ticketId: "1"
+              ticketMessages:
+                summary: История сообщений
+                value:
+                  query: |
+                    query TicketMessages($ticketId: ID!) {
+                      ticketMessages(ticketId: $ticketId) {
+                        id
+                        content
+                        senderType
+                        statusCode
+                        statusName
+                        createdAt
+                      }
+                    }
+                  variables:
+                    ticketId: "1"
+              sendMessage:
+                summary: Отправка сообщения
+                value:
+                  query: |
+                    mutation SendMessage($input: CreateMessageInput!) {
+                      sendMessage(input: $input) {
+                        id
+                        content
+                        senderType
+                        createdAt
+                      }
+                    }
+                  variables:
+                    input:
+                      ticketId: "1"
+                      content: "Добрый день, проблема сохраняется"
+      responses:
+        '200':
+          description: Успешный ответ GraphQL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQLResponse'
+              examples:
+                loginSuccess:
+                  summary: Успешная авторизация
+                  value:
+                    data:
+                      login:
+                        token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        user:
+                          id: "1"
+                          login: "user@example.com"
+                          createdAt: "2026-06-01T12:00:00Z"
+                myTicketsSuccess:
+                  summary: Список обращений
+                  value:
+                    data:
+                      myTickets:
+                        - id: "1"
+                          subject: "Не работает оплата"
+                          section: ERROR
+                          statusCode: "processing"
+                          statusName: "В обработке"
+                          createdAt: "2026-06-01T12:00:00Z"
+                          updatedAt: "2026-06-01T12:05:00Z"
+                createTicketSuccess:
+                  summary: Обращение создано
+                  value:
+                    data:
+                      createTicket:
+                        id: "2"
+                        subject: "Не работает оплата"
+                        section: ERROR
+                        statusCode: "pending"
+                        statusName: "Ожидает обработки"
+                        createdAt: "2026-06-01T13:00:00Z"
+                ticketStatusSuccess:
+                  summary: Статус обращения
+                  value:
+                    data:
+                      ticketStatus:
+                        code: "processing"
+                        name: "В обработке"
+                        message: "Ваш запрос передан специалисту"
+                ticketMessagesSuccess:
+                  summary: История сообщений
+                  value:
+                    data:
+                      ticketMessages:
+                        - id: "1"
+                          content: "Не работает оплата"
+                          senderType: USER
+                          createdAt: "2026-06-01T12:00:00Z"
+                        - id: "2"
+                          content: "Запрос принят в работу"
+                          senderType: SYSTEM
+                          statusCode: "processing"
+                          statusName: "В обработке"
+                          createdAt: "2026-06-01T12:01:00Z"
+                sendMessageSuccess:
+                  summary: Сообщение отправлено
+                  value:
+                    data:
+                      sendMessage:
+                        id: "3"
+                        content: "Добрый день, проблема сохраняется"
+                        senderType: USER
+                        createdAt: "2026-06-01T12:10:00Z"
+        '400':
+          description: Ошибка валидации GraphQL запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQLErrorResponse'
+        '401':
+          description: Неавторизованный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQLErrorResponse'
+              example:
+                errors:
+                  - message: "Unauthorized. Please provide a valid JWT token."
+                    locations:
+                      - line: 1
+                        column: 1
+                    path: ["myTickets"]
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQLErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT-токен, полученный через мутацию `login`.
+        Передаётся в заголовке `Authorization: Bearer <token>`.
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "ok"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-06-01T12:00:00Z"
+        version:
+          type: string
+          example: "1.0.0"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Internal Server Error"
+        message:
+          type: string
+          example: "An unexpected error occurred"
+        timestamp:
+          type: string
+          format: date-time
+
+    GraphQLRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: GraphQL запрос
+          example: "query { myTickets { id subject } }"
+        variables:
+          type: object
+          description: Переменные для GraphQL запроса
+          additionalProperties: true
+        operationName:
+          type: string
+          description: Имя операции (для документированных запросов)
+
+    GraphQLResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          description: Результат выполнения GraphQL запроса
+          additionalProperties: true
+        errors:
+          type: array
+          description: Ошибки выполнения (если есть)
+          items:
+            $ref: '#/components/schemas/GraphQLError'
+
+    GraphQLErrorResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphQLError'
+
+    GraphQLError:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Текст ошибки
+          example: "Cannot query field 'invalid' on type 'Query'."
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              line:
+                type: integer
+              column:
+                type: integer
+        path:
+          type: array
+          items:
+            type: string
+        extensions:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "GRAPHQL_VALIDATION_FAILED"
+
+    # === Auth Types ===
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор пользователя
+        login:
+          type: string
+          description: Логин пользователя
+        createdAt:
+          type: string
+          format: date-time
+          description: Дата создания пользователя
+
+    AuthPayload:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT-токен для авторизации
+        user:
+          $ref: '#/components/schemas/User'
+
+    LoginInput:
+      type: object
+      required:
+        - login
+        - password
+      properties:
+        login:
+          type: string
+          description: Логин пользователя
+          example: "user@example.com"
+        password:
+          type: string
+          description: Пароль пользователя
+          example: "password123"
+          format: password
+
+    # === Ticket Types ===
+    TicketSection:
+      type: string
+      enum:
+        - GENERAL
+        - SUBSCRIPTION
+        - ACCOUNT
+        - ERROR
+        - FEATURE
+      description: |
+        Раздел обращения:
+        - `GENERAL` — Общее
+        - `SUBSCRIPTION` — Подписка
+        - `ACCOUNT` — Работа ЛК
+        - `ERROR` — Ошибка
+        - `FEATURE` — Предложить функционал
+
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор обращения
+        userId:
+          type: string
+          format: uuid
+          description: ID пользователя-автора
+        subject:
+          type: string
+          description: Тема обращения
+          example: "Не работает оплата"
+        section:
+          $ref: '#/components/schemas/TicketSection'
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий к обращению
+        statusCode:
+          type: string
+          description: Код статуса обработки
+          example: "pending"
+        statusName:
+          type: string
+          description: Наименование статуса
+          example: "Ожидает обработки"
+        createdAt:
+          type: string
+          format: date-time
+          description: Дата создания обращения
+        updatedAt:
+          type: string
+          format: date-time
+          description: Дата последнего обновления
+
+    TicketStatus:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Код статуса
+          example: "processing"
+        name:
+          type: string
+          description: Наименование статуса
+          example: "В обработке"
+        message:
+          type: string
+          nullable: true
+          description: Текстовое сообщение о текущем состоянии
+          example: "Ваш запрос передан специалисту"
+
+    CreateTicketInput:
+      type: object
+      required:
+        - subject
+        - section
+      properties:
+        subject:
+          type: string
+          description: Тема обращения
+          example: "Не работает оплата"
+          minLength: 5
+          maxLength: 255
+        section:
+          $ref: '#/components/schemas/TicketSection'
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий к обращению
+          maxLength: 5000
+
+    # === Message Types ===
+    SenderType:
+      type: string
+      enum:
+        - USER
+        - SYSTEM
+      description: |
+        Тип отправителя:
+        - `USER` — Пользователь
+        - `SYSTEM` — Система (автоматическое сообщение)
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор сообщения
+        ticketId:
+          type: string
+          format: uuid
+          description: ID обращения, к которому привязано сообщение
+        userId:
+          type: string
+          format: uuid
+          description: ID автора сообщения
+        senderType:
+          $ref: '#/components/schemas/SenderType'
+        content:
+          type: string
+          description: Текст сообщения
+        statusCode:
+          type: string
+          nullable: true
+          description: Код статуса (для системных сообщений)
+        statusName:
+          type: string
+          nullable: true
+          description: Наименование статуса (для системных сообщений)
+        createdAt:
+          type: string
+          format: date-time
+          description: Дата создания сообщения
+
+    CreateMessageInput:
+      type: object
+      required:
+        - ticketId
+        - content
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+          description: ID обращения для отправки сообщения
+        content:
+          type: string
+          description: Текст сообщения
+          minLength: 1
+          maxLength: 5000
+
+    # === Status Codes Reference ===
+    StatusCode:
+      type: string
+      enum:
+        - pending
+        - processing
+        - in_progress
+        - review
+        - completed
+      description: |
+        Коды статусов обработки:
+        - `pending` — Ожидает обработки
+        - `processing` — В обработке
+        - `in_progress` — В работе
+        - `review` — На проверке
+        - `completed` — Завершён
+
+security:
+  - BearerAuth: []
+
+externalDocs:
+  description: Полная документация проекта
+  url: https://github.com/your-org/helpo/blob/main/docs/SDD.md

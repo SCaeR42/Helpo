@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: helpo-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: helpo
+      MYSQL_USER: helpo_user
+      MYSQL_PASSWORD: helpo_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: helpo-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: helpo
+      RABBITMQ_DEFAULT_PASS: helpo
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (Slim Framework)
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: helpo-api
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: helpo
+      DB_USER: helpo_user
+      DB_PASSWORD: helpo_password
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: helpo
+      RABBITMQ_PASSWORD: helpo
+      RABBITMQ_VHOST: /
+      JWT_SECRET: dev-secret-key-change-in-production
+      JWT_TTL: 86400
+      LOG_LEVEL: debug
+      LOG_PATH: /var/www/html/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: php -S 0.0.0.0:8000 -t public
+
+  # Mock Status Worker
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: helpo-worker
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www
+    environment:
+      APP_ENV: development
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: helpo
+      DB_USER: helpo_user
+      DB_PASSWORD: helpo_password
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: helpo
+      RABBITMQ_PASSWORD: helpo
+      RABBITMQ_VHOST: /
+      LOG_LEVEL: debug
+      LOG_PATH: /var/www/logs
+      MOCK_DELAY: 10
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: php workers/mock_status_worker.php
+
+volumes:
+  mysql_data:
+  rabbitmq_data:
