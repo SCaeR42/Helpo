@@ -313,11 +313,18 @@ Helpo/
 POST /api/graphql
 ```
 
+
 ### Swagger UI
 
 ```
 GET /api/docs
 ```
+
+http://localhost:8000/api/graphql
+
+http://localhost:8000/api/docs
+
+http://127.0.0.1:8000/api/health
 
 ### Основные запросы
 

@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useMutation } from '@vue/apollo-composable'
 import { gql } from 'graphql-tag'
 import type { User, AuthPayload, LoginInput } from '@/types'
+import { apolloClient } from '@/apollo/client'
 import router from '@/router'
 
 const LOGIN_MUTATION = gql`
@@ -46,10 +46,11 @@ export const useAuthStore = defineStore('auth', () => {
    * Login user with credentials
    */
   async function login(input: LoginInput): Promise<AuthPayload> {
-    const { mutate } = useMutation<AuthPayload, { input: LoginInput }>(LOGIN_MUTATION)
-
     try {
-      const result = await mutate({ input })
+      const result = await apolloClient.mutate<AuthPayload, { input: LoginInput }>({
+        mutation: LOGIN_MUTATION,
+        variables: { input },
+      })
 
       if (!result?.data?.login) {
         throw new Error('Login failed: no data returned')

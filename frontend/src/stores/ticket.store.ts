@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { useQuery, useMutation } from '@vue/apollo-composable'
 import { gql } from 'graphql-tag'
 import type { Ticket, CreateTicketInput, TicketStatus } from '@/types'
+import { apolloClient } from '@/apollo/client'
 
 const MY_TICKETS_QUERY = gql`
   query MyTickets {
@@ -50,25 +50,29 @@ export const useTicketStore = defineStore('ticket', () => {
   /**
    * Fetch user's tickets
    */
-  function fetchTickets() {
-    const { result, loading: isLoading, error: err } = useQuery(MY_TICKETS_QUERY)
+  async function fetchTickets() {
+    loading.value = true
+    error.value = null
 
-    loading.value = isLoading.value
-    error.value = err.value?.message || null
-
-    return { result, loading: isLoading, error: err }
+    try {
+      const result = await apolloClient.query<{ myTickets: Ticket[] }>(MY_TICKETS_QUERY)
+      tickets.value = result.data?.myTickets || []
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to fetch tickets'
+    } finally {
+      loading.value = false
+    }
   }
 
   /**
    * Create a new ticket
    */
   async function createTicket(input: CreateTicketInput): Promise<Ticket | null> {
-    const { mutate } = useMutation<{ createTicket: Ticket }, { input: CreateTicketInput }>(
-      CREATE_TICKET_MUTATION
-    )
-
     try {
-      const result = await mutate({ input })
+      const result = await apolloClient.mutate<{ createTicket: Ticket }, { input: CreateTicketInput }>({
+        mutation: CREATE_TICKET_MUTATION,
+        variables: { input },
+      })
       return result?.data?.createTicket || null
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to create ticket'
@@ -79,13 +83,17 @@ export const useTicketStore = defineStore('ticket', () => {
   /**
    * Get ticket status
    */
-  function getTicketStatus(ticketId: string) {
-    const { result, loading: isLoading, error: err } = useQuery<{ ticketStatus: TicketStatus }, { ticketId: string }>(
-      TICKET_STATUS_QUERY,
-      { ticketId }
-    )
-
-    return { result, loading: isLoading, error: err }
+  async function getTicketStatus(ticketId: string): Promise<TicketStatus | null> {
+    try {
+      const result = await apolloClient.query<{ ticketStatus: TicketStatus }, { ticketId: string }>(
+        TICKET_STATUS_QUERY,
+        { ticketId }
+      )
+      return result.data?.ticketStatus || null
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to fetch status'
+      return null
+    }
   }
 
   return {
