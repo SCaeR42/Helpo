@@ -18,18 +18,15 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy composer files
+# Copy only composer files for dependency installation
 COPY composer.json ./
 
 # Install dependencies
 RUN composer config --global --no-interaction allow-plugins.php-http/discovery true && \
     composer install --no-interaction --optimize-autoloader --ignore-platform-reqs --no-security-blocking
 
-# Copy application files
-COPY . .
-
-# Create logs directory
-RUN mkdir -p logs && chmod 777 logs
+# Create logs and docs directories (will be mounted via volumes)
+RUN mkdir -p logs docs && chmod 777 logs docs
 
 # Expose port
 EXPOSE 8000

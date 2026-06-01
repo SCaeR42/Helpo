@@ -79,18 +79,23 @@ $app->get('/api/health', function ($request, $response) use ($config) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-// GraphQL endpoint
-$app->post('/api/graphql', function ($request, $response) use ($schema, $config, $appLogger, $authService) {
-    $body = $request->getParsedBody();
-    $query = $body['query'] ?? '';
-    $variables = $body['variables'] ?? [];
+// GraphQL endpoint for authenticated requests (POST)
+$graphqlHandler = function ($request, $response) use ($schema, $config, $appLogger) {
+    // Handle both POST and GET
+    if ($request->getMethod() === 'POST') {
+        $body = $request->getParsedBody();
+        $query = $body['query'] ?? '';
+        $variables = $body['variables'] ?? [];
+    } else {
+        // GET request - query from URL params
+        $params = $request->getQueryParams();
+        $query = $params['query'] ?? '';
+        $variables = isset($params['variables']) ? json_decode($params['variables'], true) : [];
+    }
     
-    // Check if this is a login mutation (no auth required)
-    $isLogin = strpos($query, 'mutation') !== false && strpos($query, 'login') !== false;
-    
-    // Get user context from request attributes (set by JWT middleware if applied)
+    // Get user context from request attributes (set by JWT middleware)
     $context = [
-        'userId' => $request->getAttribute('userId', 0),
+        'userId' => (int) $request->getAttribute('userId', 0),
         'userLogin' => $request->getAttribute('userLogin', ''),
     ];
 
@@ -118,7 +123,48 @@ $app->post('/api/graphql', function ($request, $response) use ($schema, $config,
 
     $response->getBody()->write(json_encode($output, JSON_THROW_ON_ERROR));
     return $response->withHeader('Content-Type', 'application/json');
-})->add($jwtMiddleware);
+};
+
+$app->post('/api/graphql', $graphqlHandler)->add($jwtMiddleware);
+$app->get('/api/graphql', $graphqlHandler)->add($jwtMiddleware);
+
+// GraphQL endpoint for login (no auth required)
+$app->post('/api/auth', function ($request, $response) use ($schema, $config, $appLogger) {
+    $body = $request->getParsedBody();
+    $query = $body['query'] ?? '';
+    $variables = $body['variables'] ?? [];
+    
+    // Empty context for login
+    $context = [
+        'userId' => 0,
+        'userLogin' => '',
+    ];
+
+    try {
+        $result = GraphQL::executeQuery(
+            $schema,
+            $query,
+            null,
+            $context,
+            $variables,
+            null,
+            null,
+            DebugFlag::INCLUDE_DEBUG_MESSAGE | ($config['app']['debug'] ? DebugFlag::INCLUDE_TRACE : 0)
+        );
+        
+        $output = $result->toArray(DebugFlag::INCLUDE_DEBUG_MESSAGE);
+    } catch (\Throwable $e) {
+        $appLogger->error("Auth Error: " . $e->getMessage());
+        $output = [
+            'errors' => [
+                ['message' => $config['app']['debug'] ? $e->getMessage() : 'Authentication error'],
+            ],
+        ];
+    }
+
+    $response->getBody()->write(json_encode($output, JSON_THROW_ON_ERROR));
+    return $response->withHeader('Content-Type', 'application/json');
+});
 
 // Serve Swagger UI (static files would be in public/docs)
 $app->get('/api/docs', function ($request, $response) {

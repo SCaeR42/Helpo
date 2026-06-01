@@ -49,6 +49,8 @@ services:
     working_dir: /var/www/html
     volumes:
       - ./backend:/var/www/html
+      - vendor_data:/var/www/html/vendor
+      - ./docs:/var/www/html/docs
     ports:
       - "8000:8000"
     environment:
@@ -82,9 +84,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: helpo-worker
-    working_dir: /var/www/html
+    working_dir: /var/www
     volumes:
       - .:/var/www
+      - vendor_data:/var/www/backend/vendor
     environment:
       APP_ENV: development
       DB_HOST: mysql
@@ -110,3 +113,4 @@ services:
 volumes:
   mysql_data:
   rabbitmq_data:
+  vendor_data:
