@@ -19,7 +19,7 @@ use App\Services\AuthService;
 use App\Services\TicketService;
 use App\Services\MessageService;
 use App\GraphQL\SchemaBuilder;
-use App\Middleware\JwtMiddleware;
+use App\Middleware\CorsMiddleware;
 
 // Load autoloader
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -57,6 +57,13 @@ $schema = $schemaBuilder->build();
 // Create Slim app
 $app = AppFactory::create();
 
+// Add CORS middleware
+$app->add(new CorsMiddleware([
+    'origins' => ['http://localhost:5173', 'http://localhost:8000'],
+    'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    'headers' => ['Content-Type', 'Authorization'],
+]));
+
 // Add middleware
 $app->addRoutingMiddleware();
 $app->addBodyParsingMiddleware();
@@ -64,39 +71,54 @@ $app->addBodyParsingMiddleware();
 // Add error middleware
 $app->addErrorMiddleware($config['app']['debug'], true, true);
 
-// JWT Middleware (applied selectively)
-$jwtMiddleware = new JwtMiddleware($authService);
+// Helper to validate JWT token
+$validateJwt = function ($request) use ($authService): array {
+    $authHeader = $request->getHeaderLine('Authorization');
+    
+    if (empty($authHeader)) {
+        return ['error' => 'Authorization header is required'];
+    }
+    
+    if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+        return ['error' => 'Invalid Authorization header format'];
+    }
+    
+    try {
+        $payload = $authService->validateToken($matches[1]);
+        return [
+            'userId' => (int) $payload['sub'],
+            'userLogin' => $payload['login'] ?? '',
+        ];
+    } catch (\InvalidArgumentException $e) {
+        return ['error' => $e->getMessage()];
+    }
+};
 
-// === Routes ===
-
-// Health check (no auth required)
-$app->get('/api/health', function ($request, $response) use ($config) {
+// Helper to create error response
+$createErrorResponse = function (string $message, int $status = 401): Response {
+    $response = new Response();
     $response->getBody()->write(json_encode([
-        'status' => 'ok',
-        'timestamp' => date('c'),
-        'version' => '1.0.0',
-    ], JSON_PRETTY_PRINT));
-    return $response->withHeader('Content-Type', 'application/json');
-});
+        'errors' => [['message' => $message]],
+    ], JSON_THROW_ON_ERROR));
+    return $response->withHeader('Content-Type', 'application/json')->withStatus($status);
+};
 
-// GraphQL endpoint for authenticated requests (POST)
-$graphqlHandler = function ($request, $response) use ($schema, $config, $appLogger) {
-    // Handle both POST and GET
+// Helper to execute GraphQL queries
+$executeGraphQL = function ($request, $response, $userId, $userLogin) use ($schema, $config, $appLogger) {
+    // Get query from body or params
     if ($request->getMethod() === 'POST') {
         $body = $request->getParsedBody();
         $query = $body['query'] ?? '';
         $variables = $body['variables'] ?? [];
     } else {
-        // GET request - query from URL params
         $params = $request->getQueryParams();
         $query = $params['query'] ?? '';
         $variables = isset($params['variables']) ? json_decode($params['variables'], true) : [];
     }
     
-    // Get user context from request attributes (set by JWT middleware)
     $context = [
-        'userId' => (int) $request->getAttribute('userId', 0),
-        'userLogin' => $request->getAttribute('userLogin', ''),
+        'userId' => $userId,
+        'userLogin' => $userLogin,
     ];
 
     try {
@@ -108,10 +130,10 @@ $graphqlHandler = function ($request, $response) use ($schema, $config, $appLogg
             $variables,
             null,
             null,
-            DebugFlag::INCLUDE_DEBUG_MESSAGE | ($config['app']['debug'] ? DebugFlag::INCLUDE_TRACE : 0)
+            null
         );
         
-        $output = $result->toArray(DebugFlag::INCLUDE_DEBUG_MESSAGE);
+        $output = $result->toArray(DebugFlag::INCLUDE_DEBUG_MESSAGE | ($config['app']['debug'] ? DebugFlag::INCLUDE_TRACE : 0));
     } catch (\Throwable $e) {
         $appLogger->error("GraphQL Error: " . $e->getMessage());
         $output = [
@@ -125,50 +147,64 @@ $graphqlHandler = function ($request, $response) use ($schema, $config, $appLogg
     return $response->withHeader('Content-Type', 'application/json');
 };
 
-$app->post('/api/graphql', $graphqlHandler)->add($jwtMiddleware);
-$app->get('/api/graphql', $graphqlHandler)->add($jwtMiddleware);
+// === Routes ===
 
-// GraphQL endpoint for login (no auth required)
-$app->post('/api/auth', function ($request, $response) use ($schema, $config, $appLogger) {
-    $body = $request->getParsedBody();
-    $query = $body['query'] ?? '';
-    $variables = $body['variables'] ?? [];
-    
-    // Empty context for login
-    $context = [
-        'userId' => 0,
-        'userLogin' => '',
-    ];
+// Handle preflight OPTIONS requests
+$app->options('/api/{routes:.+}', function ($request, $response) {
+    return $response->withStatus(204);
+});
 
-    try {
-        $result = GraphQL::executeQuery(
-            $schema,
-            $query,
-            null,
-            $context,
-            $variables,
-            null,
-            null,
-            DebugFlag::INCLUDE_DEBUG_MESSAGE | ($config['app']['debug'] ? DebugFlag::INCLUDE_TRACE : 0)
-        );
-        
-        $output = $result->toArray(DebugFlag::INCLUDE_DEBUG_MESSAGE);
-    } catch (\Throwable $e) {
-        $appLogger->error("Auth Error: " . $e->getMessage());
-        $output = [
-            'errors' => [
-                ['message' => $config['app']['debug'] ? $e->getMessage() : 'Authentication error'],
-            ],
-        ];
-    }
-
-    $response->getBody()->write(json_encode($output, JSON_THROW_ON_ERROR));
+// Health check (no auth required)
+$app->get('/api/health', function ($request, $response) use ($config) {
+    $response->getBody()->write(json_encode([
+        'status' => 'ok',
+        'timestamp' => date('c'),
+        'version' => '1.0.0',
+    ], JSON_PRETTY_PRINT));
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-// Serve Swagger UI (static files would be in public/docs)
+// GraphQL endpoint - POST (with conditional auth)
+$app->post('/api/graphql', function ($request, $response) use ($validateJwt, $createErrorResponse, $executeGraphQL) {
+    $body = $request->getParsedBody();
+    $query = $body['query'] ?? '';
+    
+    // Check if this is a login mutation (no auth required)
+    $isLogin = stripos($query, 'login') !== false && stripos($query, 'mutation') !== false;
+    
+    if ($isLogin) {
+        // No auth required for login
+        return $executeGraphQL($request, $response, 0, '');
+    }
+    
+    // Validate JWT for other operations
+    $authResult = $validateJwt($request);
+    if (isset($authResult['error'])) {
+        return $createErrorResponse($authResult['error']);
+    }
+    
+    return $executeGraphQL($request, $response, $authResult['userId'], $authResult['userLogin']);
+});
+
+// GraphQL endpoint - GET (with auth)
+$app->get('/api/graphql', function ($request, $response) use ($validateJwt, $createErrorResponse, $executeGraphQL) {
+    // Validate JWT for GET requests
+    $authResult = $validateJwt($request);
+    if (isset($authResult['error'])) {
+        return $createErrorResponse($authResult['error']);
+    }
+    
+    return $executeGraphQL($request, $response, $authResult['userId'], $authResult['userLogin']);
+});
+
+// Serve Swagger UI
 $app->get('/api/docs', function ($request, $response) {
-    $response->getBody()->write(file_get_contents(__DIR__ . '/../docs/swagger.yaml'));
+    $swaggerPath = __DIR__ . '/../docs/swagger.yaml';
+    if (!file_exists($swaggerPath)) {
+        $response->getBody()->write('Swagger documentation not found');
+        return $response->withStatus(404);
+    }
+    $response->getBody()->write(file_get_contents($swaggerPath));
     return $response->withHeader('Content-Type', 'text/yaml');
 });
 

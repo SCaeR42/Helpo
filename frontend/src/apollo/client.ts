@@ -1,9 +1,9 @@
 import { ApolloClient, InMemoryCache, createHttpLink } from '@apollo/client/core'
 import { setContext } from '@apollo/client/link/context'
 
-// GraphQL HTTP link
+// GraphQL HTTP link - use full URL for API server
 const httpLink = createHttpLink({
-  uri: '/api/graphql',
+  uri: 'http://localhost:8000/api/graphql',
 })
 
 // Auth link for JWT

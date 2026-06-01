@@ -61,8 +61,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const form = reactive({
-  login: '',
-  password: '',
+  login: 'user@example.com',
+  password: 'password123',
 })
 
 const error = ref<string | null>(null)

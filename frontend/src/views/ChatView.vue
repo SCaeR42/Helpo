@@ -92,9 +92,10 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { useQuery, useMutation } from '@vue/apollo-composable'
+import { useQuery } from '@vue/apollo-composable'
 import { gql } from 'graphql-tag'
-import type { Message, Ticket, TicketStatus, CreateMessageInput } from '@/types'
+import { apolloClient } from '@/apollo/client'
+import type { Message, TicketStatus, CreateMessageInput } from '@/types'
 import { STATUS_COLORS } from '@/types'
 
 const route = useRoute()
@@ -204,11 +205,13 @@ async function handleSend() {
   isSending.value = true
 
   try {
-    const { mutate } = useMutation<{ sendMessage: Message }, { input: CreateMessageInput }>(SEND_MESSAGE)
-    await mutate({
-      input: {
-        ticketId,
-        content: newMessage.value.trim(),
+    await apolloClient.mutate<{ sendMessage: Message }, { input: CreateMessageInput }>({
+      mutation: SEND_MESSAGE,
+      variables: {
+        input: {
+          ticketId,
+          content: newMessage.value.trim(),
+        },
       },
     })
 

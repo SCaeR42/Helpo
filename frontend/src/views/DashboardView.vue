@@ -145,16 +145,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuery } from '@vue/apollo-composable'
 import { gql } from 'graphql-tag'
-import { useTicketStore } from '@/stores/ticket.store'
+import { apolloClient } from '@/apollo/client'
 import type { Ticket, CreateTicketInput, TicketSection } from '@/types'
 import { SECTION_LABELS, STATUS_COLORS } from '@/types'
 
 const router = useRouter()
-const ticketStore = useTicketStore()
 
 const MY_TICKETS = gql`
   query MyTickets {
@@ -179,7 +178,7 @@ const CREATE_TICKET = gql`
   }
 `
 
-const { result, loading } = useQuery<{ myTickets: Ticket[] }>(MY_TICKETS)
+const { result, loading, refetch } = useQuery<{ myTickets: Ticket[] }>(MY_TICKETS)
 
 const tickets = ref<Ticket[]>([])
 const showCreateModal = ref(false)
@@ -207,8 +206,10 @@ async function handleCreate() {
   createError.value = null
 
   try {
-    const { mutate } = useMutation<{ createTicket: Ticket }, { input: CreateTicketInput }>(CREATE_TICKET)
-    const result = await mutate({ input: { ...newTicket } })
+    const result = await apolloClient.mutate<{ createTicket: Ticket }, { input: CreateTicketInput }>({
+      mutation: CREATE_TICKET,
+      variables: { input: { ...newTicket } },
+    })
 
     if (result?.data?.createTicket) {
       showCreateModal.value = false
@@ -227,9 +228,6 @@ async function handleCreate() {
 }
 
 // Watch for result changes
-import { watch } from 'vue'
-import { useMutation } from '@vue/apollo-composable'
-
 watch(result, (newResult) => {
   if (newResult?.myTickets) {
     tickets.value = newResult.myTickets
