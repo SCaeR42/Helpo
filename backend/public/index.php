@@ -55,22 +55,14 @@ $schemaBuilder = new SchemaBuilder([
 $schema = $schemaBuilder->build();
 
 // Create Slim app
-AppFactory::setBasePath('/');
 $app = AppFactory::create();
 
-$app->addBodyParsingMiddleware();
+// Add middleware
 $app->addRoutingMiddleware();
-$app->addErrorMiddleware($config['app']['debug'], true, true)
-    ->getDefaultErrorHandler()
-    ->registerErrorHandler(\InvalidArgumentException::class, function (\Throwable $exception, $request) {
-        $response = new Response();
-        $response->getBody()->write(json_encode([
-            'errors' => [
-                ['message' => $exception->getMessage()],
-            ],
-        ], JSON_THROW_ON_ERROR));
-        return $response->withHeader('Content-Type', 'application/json')->withStatus(400);
-    });
+$app->addBodyParsingMiddleware();
+
+// Add error middleware
+$app->addErrorMiddleware($config['app']['debug'], true, true);
 
 // JWT Middleware (applied selectively)
 $jwtMiddleware = new JwtMiddleware($authService);

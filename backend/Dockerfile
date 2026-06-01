@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
-RUN docker-php-ext-install mysqli pdo pdo_mysql
+RUN docker-php-ext-install mysqli pdo pdo_mysql sockets
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
@@ -22,7 +22,8 @@ WORKDIR /var/www/html
 COPY composer.json ./
 
 # Install dependencies
-RUN composer install --no-interaction --optimize-autoloader
+RUN composer config --global --no-interaction allow-plugins.php-http/discovery true && \
+    composer install --no-interaction --optimize-autoloader --ignore-platform-reqs --no-security-blocking
 
 # Copy application files
 COPY . .
