@@ -30,14 +30,15 @@ class CorsMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): Response
     {
         $origin = $request->getHeaderLine('Origin');
+        $isAllowedOrigin = in_array($origin, $this->allowedOrigins) || empty($origin);
         
-        // Handle preflight OPTIONS request
+        // Handle preflight OPTIONS request - return immediately
         if ($request->getMethod() === 'OPTIONS') {
             $response = new Response();
             
-            if (in_array($origin, $this->allowedOrigins)) {
+            if ($isAllowedOrigin) {
                 $response = $response
-                    ->withHeader('Access-Control-Allow-Origin', $origin)
+                    ->withHeader('Access-Control-Allow-Origin', $origin ?: '*')
                     ->withHeader('Access-Control-Allow-Methods', implode(', ', $this->allowedMethods))
                     ->withHeader('Access-Control-Allow-Headers', implode(', ', $this->allowedHeaders))
                     ->withHeader('Access-Control-Allow-Credentials', 'true')
@@ -51,10 +52,11 @@ class CorsMiddleware implements MiddlewareInterface
         $response = $handler->handle($request);
         
         // Add CORS headers to response
-        if (in_array($origin, $this->allowedOrigins)) {
+        if ($isAllowedOrigin) {
             $response = $response
                 ->withHeader('Access-Control-Allow-Origin', $origin)
-                ->withHeader('Access-Control-Allow-Credentials', 'true');
+                ->withHeader('Access-Control-Allow-Credentials', 'true')
+                ->withHeader('Access-Control-Expose-Headers', 'Authorization');
         }
         
         return $response;

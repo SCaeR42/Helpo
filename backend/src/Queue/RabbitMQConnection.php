@@ -71,7 +71,7 @@ class RabbitMQConnection
      */
     private function getConnection(): AMQPStreamConnection
     {
-        if ($this->connection === null || $this->connection->isClosed()) {
+        if ($this->connection === null) {
             $this->connection = new AMQPStreamConnection(
                 host: $this->config['host'],
                 port: $this->config['port'],
@@ -92,8 +92,15 @@ class RabbitMQConnection
     public function getChannel(): AMQPChannel
     {
         if ($this->channel === null) {
-            $this->channel = $this->getConnection()->channel();
-            $this->declareInfrastructure();
+            try {
+                $this->channel = $this->getConnection()->channel();
+                $this->declareInfrastructure();
+            } catch (\Throwable $e) {
+                // Reset connection on error
+                $this->connection = null;
+                $this->channel = null;
+                throw $e;
+            }
         }
 
         return $this->channel;
@@ -147,7 +154,13 @@ class RabbitMQConnection
         }
 
         $config = self::QUEUES[$queueKey];
-        $channel = $this->getChannel();
+        
+        try {
+            $channel = $this->getChannel();
+        } catch (\Throwable $e) {
+            // If channel/connection fails, just log and return false
+            return false;
+        }
 
         $message = new AMQPMessage(
             json_encode($payload, JSON_THROW_ON_ERROR),
@@ -158,13 +171,18 @@ class RabbitMQConnection
             ]
         );
 
-        $channel->basic_publish(
-            msg: $message,
-            exchange: $config['exchange'],
-            routing_key: $config['routing_key']
-        );
-
-        return true;
+        try {
+            $channel->basic_publish(
+                msg: $message,
+                exchange: $config['exchange'],
+                routing_key: $config['routing_key']
+            );
+            return true;
+        } catch (\Throwable $e) {
+            // Reset channel on error
+            $this->channel = null;
+            return false;
+        }
     }
 
     /**
@@ -174,12 +192,20 @@ class RabbitMQConnection
      */
     public function close(): void
     {
-        if ($this->channel !== null && !$this->channel->isClosed()) {
-            $this->channel->close();
+        try {
+            if ($this->channel !== null) {
+                $this->channel->close();
+            }
+        } catch (\Throwable $e) {
+            // Channel may already be closed
         }
         
-        if ($this->connection !== null && !$this->connection->isClosed()) {
-            $this->connection->close();
+        try {
+            if ($this->connection !== null) {
+                $this->connection->close();
+            }
+        } catch (\Throwable $e) {
+            // Connection may already be closed
         }
     }
 

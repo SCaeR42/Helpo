@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Services;
@@ -26,11 +25,6 @@ class MessageService
 
     /**
      * Send a message to a ticket chat.
-     *
-     * @param int $ticketId
-     * @param int $userId
-     * @param string $content
-     * @return array
      */
     public function sendMessage(int $ticketId, int $userId, string $content): array
     {
@@ -56,17 +50,22 @@ class MessageService
 
         $messageId = $this->db->getLastInsertId();
 
-        // Publish to RabbitMQ
-        $payload = [
-            'message_id' => $messageId,
-            'ticket_id' => $ticketId,
-            'user_id' => $userId,
-            'sender_type' => 'user',
-            'content' => $content,
-            'created_at' => date('c'),
-        ];
+        // Publish to RabbitMQ (non-blocking, ignore errors)
+        try {
+            $payload = [
+                'message_id' => $messageId,
+                'ticket_id' => $ticketId,
+                'user_id' => $userId,
+                'sender_type' => 'user',
+                'content' => $content,
+                'created_at' => date('c'),
+            ];
 
-        $this->queue->publish('message', $payload);
+            $this->queue->publish('message', $payload);
+        } catch (\Throwable $e) {
+            $logger->warning("Failed to publish message to queue: " . $e->getMessage());
+        }
+        
         $logger->info("Message sent: ID={$messageId}, Ticket={$ticketId}, User={$userId}");
 
         return $this->formatMessage([
@@ -83,10 +82,6 @@ class MessageService
 
     /**
      * Get all messages for a ticket.
-     *
-     * @param int $ticketId
-     * @param int $userId User ID for access control
-     * @return array
      */
     public function getTicketMessages(int $ticketId, int $userId): array
     {
@@ -115,12 +110,6 @@ class MessageService
 
     /**
      * Add a system message (used by workers).
-     *
-     * @param int $ticketId
-     * @param string $content
-     * @param string|null $statusCode
-     * @param string|null $statusName
-     * @return array
      */
     public function addSystemMessage(int $ticketId, string $content, ?string $statusCode = null, ?string $statusName = null): array
     {
@@ -145,9 +134,6 @@ class MessageService
 
     /**
      * Format message array for GraphQL response.
-     *
-     * @param array $message
-     * @return array
      */
     private function formatMessage(array $message): array
     {

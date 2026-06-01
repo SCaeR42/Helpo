@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+// Enable output buffering to catch any accidental output
+ob_start();
+
 /**
  * Application Entry Point
  * 
@@ -57,19 +60,34 @@ $schema = $schemaBuilder->build();
 // Create Slim app
 $app = AppFactory::create();
 
-// Add CORS middleware
+// Helper to add CORS headers (must be defined first)
+$addCors = function ($response) {
+    return $response
+        ->withHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
+        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        ->withHeader('Access-Control-Allow-Credentials', 'true');
+};
+
+// Handle OPTIONS preflight requests BEFORE routing (Slim returns 404 without CORS headers otherwise)
+$app->options('/api/{routes:.+}', function ($request, $response) use ($addCors) {
+    return $addCors($response->withStatus(204));
+});
+
+// Add middleware (order matters - LIFO: last added = first executed)
+// Error middleware should be first added (executed last)
+$app->addErrorMiddleware($config['app']['debug'], true, true);
+
+// Add routing and body parsing middleware
+$app->addRoutingMiddleware();
+$app->addBodyParsingMiddleware();
+
+// Add CORS middleware LAST so it executes FIRST (adds headers to all responses)
 $app->add(new CorsMiddleware([
     'origins' => ['http://localhost:5173', 'http://localhost:8000'],
     'methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     'headers' => ['Content-Type', 'Authorization'],
 ]));
-
-// Add middleware
-$app->addRoutingMiddleware();
-$app->addBodyParsingMiddleware();
-
-// Add error middleware
-$app->addErrorMiddleware($config['app']['debug'], true, true);
 
 // Helper to validate JWT token
 $validateJwt = function ($request) use ($authService): array {
@@ -95,16 +113,16 @@ $validateJwt = function ($request) use ($authService): array {
 };
 
 // Helper to create error response
-$createErrorResponse = function (string $message, int $status = 401): Response {
+$createErrorResponse = function (string $message, int $status = 401) use ($addCors): Response {
     $response = new Response();
     $response->getBody()->write(json_encode([
         'errors' => [['message' => $message]],
     ], JSON_THROW_ON_ERROR));
-    return $response->withHeader('Content-Type', 'application/json')->withStatus($status);
+    return $addCors($response->withHeader('Content-Type', 'application/json')->withStatus($status));
 };
 
 // Helper to execute GraphQL queries
-$executeGraphQL = function ($request, $response, $userId, $userLogin) use ($schema, $config, $appLogger) {
+$executeGraphQL = function ($request, $response, $userId, $userLogin) use ($schema, $config, $appLogger, $addCors) {
     // Get query from body or params
     if ($request->getMethod() === 'POST') {
         $body = $request->getParsedBody();
@@ -144,24 +162,25 @@ $executeGraphQL = function ($request, $response, $userId, $userLogin) use ($sche
     }
 
     $response->getBody()->write(json_encode($output, JSON_THROW_ON_ERROR));
-    return $response->withHeader('Content-Type', 'application/json');
+    
+    // Clean any output buffers and ensure clean JSON response
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    return $addCors($response->withHeader('Content-Type', 'application/json'));
 };
 
 // === Routes ===
 
-// Handle preflight OPTIONS requests
-$app->options('/api/{routes:.+}', function ($request, $response) {
-    return $response->withStatus(204);
-});
-
 // Health check (no auth required)
-$app->get('/api/health', function ($request, $response) use ($config) {
+$app->get('/api/health', function ($request, $response) use ($config, $addCors) {
     $response->getBody()->write(json_encode([
         'status' => 'ok',
         'timestamp' => date('c'),
         'version' => '1.0.0',
     ], JSON_PRETTY_PRINT));
-    return $response->withHeader('Content-Type', 'application/json');
+    return $addCors($response->withHeader('Content-Type', 'application/json'));
 });
 
 // GraphQL endpoint - POST (with conditional auth)
@@ -198,14 +217,14 @@ $app->get('/api/graphql', function ($request, $response) use ($validateJwt, $cre
 });
 
 // Serve Swagger UI
-$app->get('/api/docs', function ($request, $response) {
+$app->get('/api/docs', function ($request, $response) use ($addCors) {
     $swaggerPath = __DIR__ . '/../docs/swagger.yaml';
     if (!file_exists($swaggerPath)) {
         $response->getBody()->write('Swagger documentation not found');
-        return $response->withStatus(404);
+        return $addCors($response->withStatus(404));
     }
     $response->getBody()->write(file_get_contents($swaggerPath));
-    return $response->withHeader('Content-Type', 'text/yaml');
+    return $addCors($response->withHeader('Content-Type', 'text/yaml'));
 });
 
 // Run app

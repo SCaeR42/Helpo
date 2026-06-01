@@ -67,18 +67,6 @@ class LoggerManager
 
         $logger->pushHandler($handler);
 
-        // In debug mode, also log to stderr
-        if ($this->config['level'] === 'debug') {
-            $streamHandler = new StreamHandler('php://stderr', Level::Debug);
-            $streamHandler->setFormatter(new LineFormatter(
-                "[%datetime%] %channel%.%level_name%: %message%\n",
-                'H:i:s',
-                false,
-                true
-            ));
-            $logger->pushHandler($streamHandler);
-        }
-
         self::$loggers[$channel] = $logger;
 
         return $logger;
