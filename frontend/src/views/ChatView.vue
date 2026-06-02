@@ -187,7 +187,7 @@ const {result: statusResult} = useQuery<{ ticketStatus: TicketStatus }, { ticket
 
 const messages = ref<Message[]>([])
 const status = ref<TicketStatus | null>(null)
-const pollingIntervalMs = Number(import.meta.env.VITE_CHAT_POLLING_INTERVAL) || 30000
+const pollingIntervalMs = Number(import.meta.env.VITE_CHAT_POLLING_INTERVAL) || 5000
 
 function getStatusColor(statusCode: string): string {
   const colors: Record<string, string> = {
