@@ -13,20 +13,39 @@
           </router-link>
           <h1 class="text-base sm:text-xl font-bold text-gray-800 truncate">{{ ticket?.subject || 'Загрузка...' }}</h1>
         </div>
-        <div v-if="status" class="flex-shrink-0 ml-2 sm:ml-4">
-          <span :class="['inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg', getStatusColor(status.code)]">
-            <span class="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full" :class="getStatusDot(status.code)"></span>
-            <span class="hidden sm:inline">{{ status.name }}</span>
-          </span>
+        <div class="flex items-center gap-2">
+          <!-- WebSocket connection indicator -->
+          <div v-if="isConnecting" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-yellow-100 text-yellow-700">
+            <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="hidden sm:inline">Подключение...</span>
+          </div>
+          <div v-else-if="isConnected" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-700">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span class="hidden sm:inline">Онлайн</span>
+          </div>
+          <div v-else-if="wsError" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-100 text-red-700" :title="wsError">
+            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+            <span class="hidden sm:inline">Нет связи</span>
+          </div>
+          <!-- Status indicator -->
+          <div v-if="status" class="flex-shrink-0 ml-2 sm:ml-4">
+            <span :class="['inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg', getStatusColor(status.code)]">
+              <span class="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full" :class="getStatusDot(status.code)"></span>
+              <span class="hidden sm:inline">{{ status.name }}</span>
+            </span>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Messages area -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 sm:space-y-4 bg-gray-50/50">
-      <div v-if="loading" class="flex flex-col items-center justify-center py-12">
+      <div v-if="isConnecting" class="flex flex-col items-center justify-center py-12">
         <div class="w-10 h-10 sm:w-12 sm:h-12 border-4 border-mint-200 rounded-full animate-spin border-t-primary-500"></div>
-        <p class="mt-3 text-gray-500 text-sm">Загрузка сообщений...</p>
+        <p class="mt-3 text-gray-500 text-sm">Подключение к чату...</p>
       </div>
 
       <div v-else-if="!messages?.length" class="flex flex-col items-center justify-center py-12">
@@ -131,28 +150,25 @@ import {useRoute} from 'vue-router'
 import {useQuery} from '@vue/apollo-composable'
 import {gql} from 'graphql-tag'
 import {apolloClient} from '@/apollo/client'
-import type {Message, TicketStatus, CreateMessageInput} from '@/types'
+import {useWebSocketChat} from '@/composables/useWebSocketChat'
+import type {TicketStatus, CreateMessageInput} from '@/types'
 
 const route = useRoute()
-const ticketId = route.params.ticketId as string
+const ticketId = ref<string>(route.params.ticketId as string)
 
 const messagesContainer = ref<HTMLElement | null>(null)
 const newMessage = ref('')
 const isSending = ref(false)
-let pollingInterval: number | null = null
 
-const TICKET_MESSAGES = gql`
-  query TicketMessages($ticketId: ID!) {
-    ticketMessages(ticketId: $ticketId) {
-      id
-      content
-      senderType
-      statusCode
-      statusName
-      createdAt
-    }
-  }
-`
+// WebSocket composable
+const {
+  messages: wsMessages,
+  isConnected,
+  isConnecting,
+  error: wsError,
+  connect,
+  disconnect,
+} = useWebSocketChat()
 
 const TICKET_STATUS = gql`
   query TicketStatus($ticketId: ID!) {
@@ -175,19 +191,15 @@ const SEND_MESSAGE = gql`
   }
 `
 
-const {result: messagesResult, loading, refetch} = useQuery<{ ticketMessages: Message[] }, { ticketId: string }>(
-    TICKET_MESSAGES,
-    {ticketId}
-)
-
 const {result: statusResult} = useQuery<{ ticketStatus: TicketStatus }, { ticketId: string }>(
     TICKET_STATUS,
-    {ticketId}
+    () => ({ticketId: ticketId.value})
 )
 
-const messages = ref<Message[]>([])
 const status = ref<TicketStatus | null>(null)
-const pollingIntervalMs = Number(import.meta.env.VITE_CHAT_POLLING_INTERVAL) || 5000
+
+// Используем сообщения из WebSocket
+const messages = wsMessages
 
 function getStatusColor(statusCode: string): string {
   const colors: Record<string, string> = {
@@ -211,30 +223,33 @@ function getStatusDot(statusCode: string): string {
   return colors[statusCode] || 'bg-gray-500'
 }
 
-watch(messagesResult, (newResult) => {
-  if (newResult?.ticketMessages) {
-    messages.value = newResult.ticketMessages
-    scrollToBottom()
-  }
-}, {immediate: true})
-
 watch(statusResult, (newResult) => {
   if (newResult?.ticketStatus) {
     status.value = newResult.ticketStatus
   }
 }, {immediate: true})
 
+// Подключаемся к WebSocket при монтировании
 onMounted(() => {
-  pollingInterval = window.setInterval(async () => {
-    await refetch()
-  }, pollingIntervalMs)
+  connect(ticketId.value)
 })
 
+// Отключаемся при размонтировании
 onUnmounted(() => {
-  if (pollingInterval) {
-    clearInterval(pollingInterval)
-  }
+  disconnect()
 })
+
+// Переподключаемся при изменении ticketId в маршруте
+watch(
+  () => route.params.ticketId as string,
+  (newTicketId) => {
+    if (newTicketId && newTicketId !== ticketId.value) {
+      ticketId.value = newTicketId
+      disconnect()
+      connect(newTicketId)
+    }
+  }
+)
 
 function formatTime(dateStr: string): string {
   return new Date(dateStr).toLocaleTimeString('ru-RU', {
@@ -251,24 +266,29 @@ function scrollToBottom() {
   })
 }
 
+// Прокрутка вниз при получении новых сообщений
+watch(wsMessages, () => {
+  scrollToBottom()
+}, {deep: true})
+
 async function handleSend() {
   if (!newMessage.value.trim()) return
 
   isSending.value = true
 
   try {
-    await apolloClient.mutate<{ sendMessage: Message }, { input: CreateMessageInput }>({
+    await apolloClient.mutate<{ sendMessage: any }, { input: CreateMessageInput }>({
       mutation: SEND_MESSAGE,
       variables: {
         input: {
-          ticketId,
+          ticketId: ticketId.value,
           content: newMessage.value.trim(),
         },
       },
     })
 
     newMessage.value = ''
-    await refetch()
+    // Сообщение придёт через WebSocket, не нужно вручную обновлять
   } catch (err) {
     console.error('Failed to send message:', err)
   } finally {
