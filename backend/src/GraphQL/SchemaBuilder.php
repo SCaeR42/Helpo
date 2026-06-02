@@ -80,7 +80,7 @@ class SchemaBuilder
                     'resolve' => function ($root, $args, $context) {
                         return $this->services['message']->getTicketMessages(
                             (int) $args['ticketId'],
-                            $context['userId']
+                            (int) $context['userId']
                         );
                     },
                 ],
