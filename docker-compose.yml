@@ -82,10 +82,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: helpo-worker
-    working_dir: /var/www
+    working_dir: /var/www/html
     volumes:
-      - .:/var/www
-      - vendor_data:/var/www/backend/vendor
+      - ./backend:/var/www/html
+      - ./workers:/var/www/html/workers
+      - vendor_data:/var/www/html/vendor
     environment:
       APP_ENV: development
       DB_HOST: mysql
@@ -99,7 +100,7 @@ services:
       RABBITMQ_PASSWORD: helpo
       RABBITMQ_VHOST: /
       LOG_LEVEL: debug
-      LOG_PATH: /var/www/logs
+      LOG_PATH: /var/www/html/logs
       MOCK_DELAY: 10
     depends_on:
       mysql:

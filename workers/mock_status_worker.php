@@ -12,22 +12,20 @@ declare(strict_types=1);
  * Usage: php workers/mock_status_worker.php
  */
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../backend/vendor/autoload.php';
 
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use App\Database\Database;
-use App\Services\MessageService;
 use App\Utils\LoggerManager;
 
 // Load configuration
-$config = require __DIR__ . '/../config/app.php';
+$config = require __DIR__ . '/../backend/config/app.php';
 
 // Initialize dependencies
 $loggerManager = new LoggerManager($config['logging']);
 $logger = $loggerManager->getLogger('queue');
 $db = Database::getInstance($config['database']);
-$messageService = new MessageService($db, null, $loggerManager);
 
 // Mock status sequence for MVP
 $MOCK_STATUSES = [
@@ -37,12 +35,12 @@ $MOCK_STATUSES = [
         'message' => 'Запрос передан специалисту',
     ],
     [
-        'code' => 'processing',
+        'code' => 'in_progress',
         'name' => 'В обработке',
         'message' => 'Начат анализ проблемы',
     ],
     [
-        'code' => 'in_progress',
+        'code' => 'processing',
         'name' => 'В работе',
         'message' => 'Проблема идентифицирована',
     ],
@@ -103,13 +101,13 @@ function addTicketLog(int $ticketId, string $statusCode, string $statusName, str
  */
 function processTicket(int $ticketId): void
 {
-    global $logger, $messageService, $MOCK_STATUSES;
+    global $logger, $db, $MOCK_STATUSES;
     
     $logger->info("Starting mock processing for ticket: {$ticketId}");
     
     foreach ($MOCK_STATUSES as $index => $status) {
         // Wait 1 minute between steps (for production; use shorter delay for testing)
-        $sleepTime = getenv('MOCK_DELAY') ? (int) getenv('MOCK_DELAY') : 60;
+        $sleepTime = getenv('MOCK_DELAY') ? (int) getenv('MOCK_DELAY') : 10;
         $logger->info("Step {$index}/5: Waiting {$sleepTime}s before status update");
         sleep($sleepTime);
         
@@ -119,12 +117,12 @@ function processTicket(int $ticketId): void
         // Add log entry
         addTicketLog($ticketId, $status['code'], $status['name'], $status['message']);
         
-        // Add system message to chat
-        $messageService->addSystemMessage(
-            $ticketId,
-            $status['message'],
-            $status['code'],
-            $status['name']
+        // Add system message to chat directly
+        $db->query(
+            'INSERT INTO messages (ticket_id, user_id, sender_type, content, status_code, status_name) 
+             VALUES (?, NULL, ?, ?, ?, ?)',
+            [$ticketId, 'system', $status['message'], $status['code'], $status['name']],
+            'issss'
         );
         
         $logger->info("Step {$index}/5: Status updated to {$status['code']} - {$status['message']}");

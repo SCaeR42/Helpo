@@ -11,7 +11,7 @@ declare(strict_types=1);
 use Dotenv\Dotenv;
 
 // Load environment variables
-$dotenv = Dotenv::createImmutable(dirname(__DIR__));
+$dotenv = Dotenv::createImmutable(dirname(__DIR__, 2));
 $dotenv->safeLoad();
 
 return [

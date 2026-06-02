@@ -85,10 +85,10 @@ class MessageService
      */
     public function getTicketMessages(int $ticketId, int $userId): array
     {
-        // Verify access
+        // Verify access - ticket must belong to user
         $ticket = $this->db->fetchOne(
             'SELECT id FROM tickets WHERE id = ? AND user_id = ?',
-            [$ticketId, $userId],
+            [(int) $ticketId, (int) $userId],
             'ii'
         );
 
@@ -101,7 +101,7 @@ class MessageService
              FROM messages 
              WHERE ticket_id = ? 
              ORDER BY created_at ASC',
-            [$ticketId],
+            [(int) $ticketId],
             'i'
         );
 

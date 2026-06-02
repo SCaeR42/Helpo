@@ -41,15 +41,15 @@
 
       <div v-else class="space-y-3">
         <div
-          v-for="message in messages"
-          :key="message.id"
-          :class="[
+            v-for="message in messages"
+            :key="message.id"
+            :class="[
             'flex',
             message.senderType === 'USER' ? 'justify-end' : 'justify-start',
           ]"
         >
           <div
-            :class="[
+              :class="[
               'max-w-[85%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 shadow-sm',
               message.senderType === 'USER'
                 ? 'bg-gradient-to-br from-primary-500 to-accent-500 text-white shadow-primary-500/20'
@@ -90,16 +90,16 @@
     <div class="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-100 bg-white">
       <form @submit.prevent="handleSend" class="flex gap-2 sm:gap-3">
         <textarea
-          v-model="newMessage"
-          rows="2"
-          placeholder="Введите сообщение..."
-          class="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 bg-gray-50 hover:bg-white resize-none text-sm sm:text-base"
-          @keydown.ctrl.enter="handleSend"
+            v-model="newMessage"
+            rows="2"
+            placeholder="Введите сообщение..."
+            class="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 bg-gray-50 hover:bg-white resize-none text-sm sm:text-base"
+            @keydown.ctrl.enter="handleSend"
         ></textarea>
         <button
-          type="submit"
-          :disabled="isSending || !newMessage.trim()"
-          class="inline-flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 font-semibold rounded-xl bg-gradient-to-r from-primary-500 to-accent-500 text-white hover:from-primary-600 hover:to-accent-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-primary-500/30 self-end"
+            type="submit"
+            :disabled="isSending || !newMessage.trim()"
+            class="inline-flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 font-semibold rounded-xl bg-gradient-to-r from-primary-500 to-accent-500 text-white hover:from-primary-600 hover:to-accent-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-primary-500/30 self-end"
         >
           <span v-if="isSending">
             <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -126,12 +126,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { useQuery } from '@vue/apollo-composable'
-import { gql } from 'graphql-tag'
-import { apolloClient } from '@/apollo/client'
-import type { Message, TicketStatus, CreateMessageInput } from '@/types'
+import {ref, watch, nextTick, onMounted, onUnmounted} from 'vue'
+import {useRoute} from 'vue-router'
+import {useQuery} from '@vue/apollo-composable'
+import {gql} from 'graphql-tag'
+import {apolloClient} from '@/apollo/client'
+import type {Message, TicketStatus, CreateMessageInput} from '@/types'
 
 const route = useRoute()
 const ticketId = route.params.ticketId as string
@@ -175,18 +175,19 @@ const SEND_MESSAGE = gql`
   }
 `
 
-const { result: messagesResult, loading, refetch } = useQuery<{ ticketMessages: Message[] }, { ticketId: string }>(
-  TICKET_MESSAGES,
-  { ticketId }
+const {result: messagesResult, loading, refetch} = useQuery<{ ticketMessages: Message[] }, { ticketId: string }>(
+    TICKET_MESSAGES,
+    {ticketId}
 )
 
-const { result: statusResult } = useQuery<{ ticketStatus: TicketStatus }, { ticketId: string }>(
-  TICKET_STATUS,
-  { ticketId }
+const {result: statusResult} = useQuery<{ ticketStatus: TicketStatus }, { ticketId: string }>(
+    TICKET_STATUS,
+    {ticketId}
 )
 
 const messages = ref<Message[]>([])
 const status = ref<TicketStatus | null>(null)
+const pollingIntervalMs = Number(import.meta.env.VITE_CHAT_POLLING_INTERVAL) || 30000
 
 function getStatusColor(statusCode: string): string {
   const colors: Record<string, string> = {
@@ -215,18 +216,18 @@ watch(messagesResult, (newResult) => {
     messages.value = newResult.ticketMessages
     scrollToBottom()
   }
-}, { immediate: true })
+}, {immediate: true})
 
 watch(statusResult, (newResult) => {
   if (newResult?.ticketStatus) {
     status.value = newResult.ticketStatus
   }
-}, { immediate: true })
+}, {immediate: true})
 
 onMounted(() => {
   pollingInterval = window.setInterval(async () => {
     await refetch()
-  }, 30000)
+  }, pollingIntervalMs)
 })
 
 onUnmounted(() => {

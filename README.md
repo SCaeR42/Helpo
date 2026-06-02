@@ -195,7 +195,9 @@ rabbitmqctl set_permissions -p /helpo helpo ".*" ".*" ".*"
 ### Вариант 2: Docker Compose
 
 ```bash
+docker-compose down
 docker-compose up -d
+docker-compose logs -f worker
 ```
 
 ---

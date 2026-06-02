@@ -46,14 +46,14 @@ CREATE TABLE IF NOT EXISTS `tickets` (
 CREATE TABLE IF NOT EXISTS `messages` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `ticket_id` INT UNSIGNED NOT NULL,
-    `user_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED DEFAULT NULL,
     `sender_type` ENUM('user', 'system') NOT NULL DEFAULT 'user',
     `content` TEXT NOT NULL,
     `status_code` VARCHAR(50) DEFAULT NULL,
     `status_name` VARCHAR(100) DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT `fk_messages_ticket` FOREIGN KEY (`ticket_id`) REFERENCES `tickets`(`id`) ON DELETE CASCADE,
-    CONSTRAINT `fk_messages_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_messages_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_ticket_id` (`ticket_id`),
     INDEX `idx_user_id` (`user_id`),
     INDEX `idx_created_at` (`created_at`)
