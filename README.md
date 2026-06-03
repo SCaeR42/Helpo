@@ -163,7 +163,10 @@ while ($channel->is_consuming()) {
 | Метод | Поведение |
 |-------|-----------|
 | `$message->ack()` | Сообщение успешно обработано, удаляется из очереди |
-| `$message->nack()` | Ошибка обработки, сообщение возвращается в очередь (requeue) |
+| `$message->nack(requeue: true)` | Ошибка обработки, сообщение возвращается в очередь для повторной попытки |
+| `$message->nack(requeue: false)` | Превышен лимит ретраев (3), сообщение перенаправляется в DLQ |
+
+Счётчик ретраев читается из заголовков `x-death` сообщения ([`mock_status_worker.php:142`](workers/mock_status_worker.php:142)).
 
 ### Воркеры
 
@@ -214,20 +217,58 @@ php workers/mock_status_worker.php
 
 ### Управление инфраструктурой
 
-При первом подключении [`RabbitMQConnection`](backend/src/Queue/RabbitMQConnection.php:114) автоматически создаёт:
+При первом подключении [`RabbitMQConnection`](backend/src/Queue/RabbitMQConnection.php:122) автоматически создаёт:
 
 - **Exchange** `helpo.direct` (type: `direct`, durable: `true`)
-- **Очереди** — все три очереди (durable: `true`, auto_delete: `false`)
-- **Bindings** — привязка каждой очереди к exchange по соответствующему routing_key
+- **Dead-Letter Exchange** `helpo.dlx` (type: `direct`, durable: `true`)
+- **Очереди** — все три очереди (durable: `true`, auto_delete: `false`) с аргументами DLQ
+- **DLQ** — dead-letter очереди (`*_queue.dlq`), привязанные к `helpo.dlx`
+- **Bindings** — привязка каждой очереди к соответствующему exchange
 
 ### Отказоустойчивость
 
+#### Dead-Letter Queue (DLQ)
+
+Каждая основная очередь настроена с **Dead-Letter Exchange** (`helpo.dlx`). При превышении лимита ретраев сообщение автоматически перенаправляется в DLQ:
+
+| Основная очередь | DLQ | DLX Routing Key |
+|------------------|-----|-----------------|
+| `ticket_queue` | `ticket_queue.dlq` | `ticket.create.failed` |
+| `message_queue` | `message_queue.dlq` | `message.send.failed` |
+| `status_queue` | `status_queue.dlq` | `status.update.failed` |
+
+Конфигурация объявлена в [`RabbitMQConnection.php`](backend/src/Queue/RabbitMQConnection.php:113):
+
+```php
+public const DLX_EXCHANGE = 'helpo.dlx';
+public const DLX_ROUTING_KEY_SUFFIX = '.failed';
+public const MAX_RETRIES = 3;
+```
+
+#### Механизм ретраев
+
 | Сценарий | Поведение |
 |----------|-----------|
-| RabbitMQ недоступен при публикации | Ошибка логируется, запрос не прерывается |
-| Ошибка в воркере при обработке | `$message->nack()` — сообщение возвращается в очередь |
+| Ошибка при обработке | `$message->nack(requeue: true)` — сообщение возвращается в очередь |
+| Превышение лимита (3 попытки) | `$message->nack(requeue: false)` — сообщение уходит в DLQ |
 | Воркер упал во время обработки | Сообщение не подтверждено, автоматически requeue после закрытия канала |
+| RabbitMQ недоступен при публикации | Ошибка логируется, запрос не прерывается |
 | Перезапуск воркера | Безопасно — сообщения сохраняются в durable очереди |
+
+#### Prefetch (QoS)
+
+Воркеры используют `basic_qos(prefetch_count: 1)` — обработка **одного сообщения за раз**. Это предотвращает накопление unacked-сообщений при замедлении обработки.
+
+#### Мониторинг DLQ
+
+Для просмотра «мёртвых» сообщений используйте RabbitMQ Management UI (`http://localhost:15672`):
+
+1. Перейдите в раздел **Queues**
+2. Найдите очередь с суффиксом `.dlq` (например, `ticket_queue.dlq`)
+3. Просмотрите сообщения, заголовки `x-death` (причина и число ретраев)
+
+> [!IMPORTANT]
+> Сообщения в DLQ **не обрабатываются автоматически**. Их нужно разобрать вручную или реализовать отдельный DLQ-worker для повторной обработки.
 
 ### Логирование
 
@@ -374,6 +415,8 @@ rabbitmqctl set_permissions -p /helpo helpo ".*" ".*" ".*"
 docker-compose down
 docker-compose up -d
 docker-compose logs -f worker
+
+docker-compose logs -f websocket
 ```
 
 ---

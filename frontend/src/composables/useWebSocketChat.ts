@@ -1,6 +1,8 @@
 import {ref, onUnmounted} from 'vue'
 import type {Message} from '@/types'
 
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8080'
+
 /**
  * Composable для работы с чатом через WebSocket.
  * 
@@ -47,7 +49,7 @@ export function useWebSocketChat() {
       return
     }
 
-    const wsUrl = `ws://127.0.0.1:8081?token=${encodeURIComponent(token)}`
+    const wsUrl = `${WS_URL}?token=${encodeURIComponent(token)}`
     console.log('[WS] URL:', wsUrl)
     
     try {

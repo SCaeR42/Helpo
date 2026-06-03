@@ -12,15 +12,17 @@ declare(strict_types=1);
  * Usage: php workers/mock_status_worker.php
  */
 
-require_once __DIR__ . '/../backend/vendor/autoload.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
+use PhpAmqpLib\Wire\AMQPTable;
 use App\Database\Database;
+use App\Queue\RabbitMQConnection;
 use App\Utils\LoggerManager;
 
 // Load configuration
-$config = require __DIR__ . '/../backend/config/app.php';
+$config = require __DIR__ . '/../config/app.php';
 
 // Initialize dependencies
 $loggerManager = new LoggerManager($config['logging']);
@@ -132,6 +134,32 @@ function processTicket(int $ticketId): void
 }
 
 /**
+ * Get retry count from message headers.
+ *
+ * @param AMQPMessage $message
+ * @return int
+ */
+function getRetryCount(AMQPMessage $message): int
+{
+    if ($message->has('application_headers')) {
+        $headers = $message->get('application_headers')->getNativeData();
+        // x-death contains retry count for DLX redeliveries
+        $xDeath = $headers['x-death'] ?? [];
+        if (!empty($xDeath) && is_array($xDeath)) {
+            // Sum all death counts for this message
+            $totalDeaths = 0;
+            foreach ($xDeath as $death) {
+                $totalDeaths += $death['count'] ?? 0;
+            }
+            return $totalDeaths;
+        }
+        // Fallback: check custom retry counter
+        return (int) ($headers['x-retry-count'] ?? 0);
+    }
+    return 0;
+}
+
+/**
  * Message callback for RabbitMQ consumer.
  *
  * @param AMQPMessage $message
@@ -150,18 +178,31 @@ function processMessage(AMQPMessage $message): void
         return;
     }
     
-    $logger->info("Received ticket from queue: {$ticketId}");
+    // Check retry count
+    $retryCount = getRetryCount($message);
+    $maxRetries = RabbitMQConnection::MAX_RETRIES;
+    
+    $logger->info("Received ticket from queue: {$ticketId} (attempt " . ($retryCount + 1) . "/{$maxRetries})");
+    
+    // If max retries exceeded, reject without requeue (message goes to DLQ)
+    if ($retryCount >= $maxRetries) {
+        $logger->error("Ticket {$ticketId} exceeded max retries ({$maxRetries}), sending to DLQ");
+        $message->nack(requeue: false);
+        return;
+    }
     
     try {
         processTicket((int) $ticketId);
         $message->ack();
+        $logger->info("Ticket {$ticketId} processed successfully");
     } catch (\Throwable $e) {
         $logger->error("Error processing ticket {$ticketId}: " . $e->getMessage());
-        $message->nack();
+        // Requeue for retry (DLQ will catch after max retries)
+        $message->nack(requeue: true);
     }
 }
 
-// Connect to RabbitMQ
+// Connect to RabbitMQ using RabbitMQConnection
 $rabbitConfig = $config['rabbitmq'];
 $connection = new AMQPStreamConnection(
     $rabbitConfig['host'],
@@ -173,14 +214,13 @@ $connection = new AMQPStreamConnection(
 
 $channel = $connection->channel();
 
-// Declare queue
-$channel->queue_declare(
-    queue: 'ticket_queue',
-    passive: false,
-    durable: true,
-    exclusive: false,
-    auto_delete: false
-);
+// Set prefetch limit — process only 1 message at a time
+// basic_qos(prefetch_size, prefetch_count, global)
+$channel->basic_qos(0, 1, false);
+
+// Declare infrastructure (queues, exchanges, DLQ) via RabbitMQConnection
+$rabbitConnection = RabbitMQConnection::getInstance($rabbitConfig);
+$rabbitConnection->getChannel();
 
 $logger->info("Mock Status Worker started. Waiting for messages...");
 

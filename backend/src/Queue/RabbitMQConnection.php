@@ -7,6 +7,7 @@ namespace App\Queue;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Channel\AMQPChannel;
+use PhpAmqpLib\Wire\AMQPTable;
 
 /**
  * RabbitMQ connection and channel manager.
@@ -107,13 +108,20 @@ class RabbitMQConnection
     }
 
     /**
+     * Dead-letter exchange and queue configuration.
+     */
+    public const DLX_EXCHANGE = 'helpo.dlx';
+    public const DLX_ROUTING_KEY_SUFFIX = '.failed';
+    public const MAX_RETRIES = 3;
+
+    /**
      * Declare exchanges and queues.
      *
      * @return void
      */
     private function declareInfrastructure(): void
     {
-        // Declare exchange
+        // Declare main exchange
         $this->channel->exchange_declare(
             exchange: 'helpo.direct',
             type: 'direct',
@@ -122,18 +130,56 @@ class RabbitMQConnection
             auto_delete: false
         );
 
-        // Declare queues
+        // Declare dead-letter exchange
+        $this->channel->exchange_declare(
+            exchange: self::DLX_EXCHANGE,
+            type: 'direct',
+            passive: false,
+            durable: true,
+            auto_delete: false
+        );
+
+        // Declare queues with DLQ arguments
         foreach (self::QUEUES as $queueConfig) {
+            $queueName = $queueConfig['queue'];
+            $dlqQueueName = $queueName . '.dlq';
+            $dlxRoutingKey = $queueConfig['routing_key'] . self::DLX_ROUTING_KEY_SUFFIX;
+
+            // Declare DLQ (dead-letter queue)
             $this->channel->queue_declare(
-                queue: $queueConfig['queue'],
+                queue: $dlqQueueName,
                 passive: false,
                 durable: true,
                 exclusive: false,
                 auto_delete: false
             );
 
+            // Bind DLQ to DLX
             $this->channel->queue_bind(
-                queue: $queueConfig['queue'],
+                queue: $dlqQueueName,
+                exchange: self::DLX_EXCHANGE,
+                routing_key: $dlxRoutingKey
+            );
+
+            // Declare main queue with DLQ arguments
+            $arguments = new AMQPTable([
+                'x-dead-letter-exchange' => self::DLX_EXCHANGE,
+                'x-dead-letter-routing-key' => $dlxRoutingKey,
+                'x-max-retries' => self::MAX_RETRIES,
+            ]);
+
+            $this->channel->queue_declare(
+                queue: $queueName,
+                passive: false,
+                durable: true,
+                exclusive: false,
+                auto_delete: false,
+                arguments: $arguments
+            );
+
+            // Bind main queue to main exchange
+            $this->channel->queue_bind(
+                queue: $queueName,
                 exchange: 'helpo.direct',
                 routing_key: $queueConfig['routing_key']
             );
