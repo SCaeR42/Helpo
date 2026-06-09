@@ -11,6 +11,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+// Suppress deprecation warnings from Ratchet (PHP 8.2+ compatibility)
+error_reporting(E_ALL & ~E_DEPRECATED);
+
 use App\Database\Database;
 use App\Queue\RabbitMQConnection;
 use App\Utils\LoggerManager;

@@ -165,7 +165,6 @@ class RabbitMQConnection
             $arguments = new AMQPTable([
                 'x-dead-letter-exchange' => self::DLX_EXCHANGE,
                 'x-dead-letter-routing-key' => $dlxRoutingKey,
-                'x-max-retries' => self::MAX_RETRIES,
             ]);
 
             $this->channel->queue_declare(
